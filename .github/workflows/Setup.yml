@@ -1,0 +1,73 @@
+name: Initialize New Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: 'Project Name'
+        required: true
+        default: 'MyArduinoProject'
+      language:
+        description: "Target Language"
+        required: true
+        type: choice
+        options:
+          - c
+          - cpp
+      mcu:
+        description: 'Target controller'
+        required: true
+        type: choice
+        options:
+          - atmega328p
+          - esp32
+jobs:
+  generate-enviroment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Generate Project Structure
+        run: |
+          mkdir -p src scripts   
+
+          cat <<EOF> CMakeLists.txt 
+          cmake_minimum_required(VERSION 3.10)
+          project(${{github.event.inputs.project_name}} LANGUAGES C CXX)
+          set(MCU ${{github.event.inputs.mcu}})
+          
+          if(MCU STREQUAL "atmega328p")
+            set(CMAKE_C_FLAGS "-mmcu=\${MCU} -Os - Wall")
+            set(CMAKE_CXX_FLAGS "-mmcu=\${MCU} -Os - Wall")
+            set(F_CPU 16000000UL)
+            add_definitions(-DF_CPU=\${F_CPU})
+          endif()
+          add_executable(\${PORJECT_NAME} src/main.${{ github.event.inputs.language }})
+          EOF
+
+          cat <<EOF > shell.nix
+          { pkgs ? import <nixpkgs> {} }:
+          pkgs.mkShell {
+            buildInputs = with pkgs; [
+              cmake
+              gnumake
+              avrdude
+              pkgsCross.avr.buildPackages.gcc
+            ];
+            shellHook = ''
+              echo " Shell-Nix activated for ${{ github.event.inputs.mcu }} "
+            '';
+          }
+          EOF
+
+          cat <<EOF > scripts/build.sh
+
+          mkdir -p build && cd build
+
+          cmake..
+          make -j\${nproc}
+          EOF
+
+          cat <<EOF > scripts/deploy.sh
+          
+
