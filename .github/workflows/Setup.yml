@@ -6,7 +6,7 @@ on:
       project_name:
         description: 'Project Name'
         required: true
-        default: 'MyArduinoProject'
+        default: 'Arduino_Subwoofer'
       language:
         description: "Target Language"
         required: true
@@ -63,13 +63,28 @@ jobs:
             set(CMAKE_CXX_FLAGS "-mmcu=\${MCU} -Os -Wall")
             add_definitions(-DF_CPU=16000000UL)
           endif()
+
           add_executable(\${PROJECT_NAME} src/main.$LANGUAGE)
 
           if(MCU STREQUAL "atmega328p")
             add_custom_command(TARGET \${PROJECT_NAME} POST_BUILD
-              COMMAND avr-objcopy -O ihex -R .eeprom \${PROJECT_NAME} \${PROJECT_NAME}.hex
-              COMMENT "Generating HEX file")
+              COMMAND avr-objcopy -O ihex -R .eeprom \${PROJECT_NAME} \${PROJECT_NAME}.hex)
           endif()
+          EOF
+
+          cat <<EOF > shell.nix
+          { pkgs ? import <nixpkgs> {} }:
+          pkgs.mkShell {
+            buildInputs = with pkgs; [
+              cmake
+              gnumake
+              avrdude
+              pkgsCross.avr.buildPackages.gcc
+            ];
+            shellHook = ''
+              echo " Environment ready for $MCU "
+            '';
+          }
           EOF
 
           cat <<EOF > scripts/build.sh
@@ -79,6 +94,16 @@ jobs:
           make -j\$(nproc)
           EOF
 
+          cat <<EOF > scripts/deploy.sh
+          #!/bin/bash
+          PORT=\$(ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -n 1)
+          if [ -z "\$PORT" ]; then
+              echo "Error: No USB connection found"
+              exit 1
+          fi
+          avrdude -v -p atmega328p -c arduino -P "\$PORT" -b 115200 -D -U flash:w:build/$PROJECT_NAME.hex:i
+          EOF
+
           chmod +x scripts/*.sh
 
       - name: Commit changes
@@ -86,5 +111,4 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          # Evităm eroarea dacă nu sunt modificări
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Initialize project structure" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Initialize $PROJECT_NAME structure" && git push)
