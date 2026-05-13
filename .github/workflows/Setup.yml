@@ -31,18 +31,29 @@ jobs:
         run: |
           mkdir -p src scripts   
 
+          cat <<EOF> src/main.${{github.event.inputs.language}}
+          int main()\n
+          {return 0;}
+          EOF
           cat <<EOF> CMakeLists.txt 
           cmake_minimum_required(VERSION 3.10)
           project(${{github.event.inputs.project_name}} LANGUAGES C CXX)
           set(MCU ${{github.event.inputs.mcu}})
           
           if(MCU STREQUAL "atmega328p")
-            set(CMAKE_C_FLAGS "-mmcu=\${MCU} -Os - Wall")
-            set(CMAKE_CXX_FLAGS "-mmcu=\${MCU} -Os - Wall")
+            set(CMAKE_C_FLAGS "-mmcu=\${MCU} -Os -Wall")
+            set(CMAKE_CXX_FLAGS "-mmcu=\${MCU} -Os -Wall")
             set(F_CPU 16000000UL)
             add_definitions(-DF_CPU=\${F_CPU})
           endif()
-          add_executable(\${PORJECT_NAME} src/main.${{ github.event.inputs.language }})
+          add_executable(\${PROJECT_NAME} src/main.${{ github.event.inputs.language }})
+
+          if(MCU STREQUAL "atmega328p")
+            add_custom_command(TARGET \${PROJECT_NAME} POST_BUILD
+              COMMAND \${CMAKE_OBJCOPY} -O ihex -R .eeprom \${PROJECT_NAME} \${PROJECT_NAME}.hex
+              COMMENT "Generating HEX file for upload")
+          endif()
+
           EOF
 
           cat <<EOF > shell.nix
@@ -69,5 +80,22 @@ jobs:
           EOF
 
           cat <<EOF > scripts/deploy.sh
-          
+          PORT=\$(ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -n 1)
+          if [ -z "\$PORT" ]; then
+              echo "Error: No usb connection"
+              exit 1
+          fi
+          echo "Flash on \$PORT..."
+          avrdude -v -p atmega328p -c arduino -P "\$PORT" -b 115200 -D -U flash:w:build/${{ github.event.inputs.project_name }}.hex:i
+          EOF
 
+
+          chmod +x scripts/*.sh
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Initialize ${{ github.event.inputs.project_name }} structure"
+          git push
