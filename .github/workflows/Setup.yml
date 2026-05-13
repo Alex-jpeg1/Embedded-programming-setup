@@ -11,84 +11,73 @@ on:
         description: "Target Language"
         required: true
         type: choice
-        options:
-          - c
-          - cpp
+        options: [c, cpp]
       mcu:
         description: 'Target controller'
         required: true
         type: choice
-        options:
-          - atmega328p
-          - esp32
+        options: [atmega328p, esp32]
+  workflow_call:
+    inputs:
+      project_name:
+        type: string
+        required: true
+      language:
+        type: string
+        required: true
+      mcu:
+        type: string
+        required: true
+
 jobs:
   generate-enviroment:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Generate Project Structure
         run: |
+          PROJECT_NAME="${{ inputs.project_name || github.event.inputs.project_name }}"
+          LANGUAGE="${{ inputs.language || github.event.inputs.language }}"
+          MCU="${{ inputs.mcu || github.event.inputs.mcu }}"
+
           mkdir -p src scripts   
 
-          cat <<EOF> src/main.${{github.event.inputs.language}}
-          int main()\n
-          {return 0;}
+          cat <<EOF > src/main.$LANGUAGE
+          #include <Arduino.h>
+          int main() {
+              init();
+              while(1) { }
+              return 0;
+          }
           EOF
-          cat <<EOF> CMakeLists.txt 
+
+          cat <<EOF > CMakeLists.txt 
           cmake_minimum_required(VERSION 3.10)
-          project(${{github.event.inputs.project_name}} LANGUAGES C CXX)
-          set(MCU ${{github.event.inputs.mcu}})
+          project($PROJECT_NAME LANGUAGES C CXX)
+          set(MCU $MCU)
           
           if(MCU STREQUAL "atmega328p")
             set(CMAKE_C_FLAGS "-mmcu=\${MCU} -Os -Wall")
             set(CMAKE_CXX_FLAGS "-mmcu=\${MCU} -Os -Wall")
-            set(F_CPU 16000000UL)
-            add_definitions(-DF_CPU=\${F_CPU})
+            add_definitions(-DF_CPU=16000000UL)
           endif()
-          add_executable(\${PROJECT_NAME} src/main.${{ github.event.inputs.language }})
+          add_executable(\${PROJECT_NAME} src/main.$LANGUAGE)
 
           if(MCU STREQUAL "atmega328p")
             add_custom_command(TARGET \${PROJECT_NAME} POST_BUILD
-              COMMAND \${CMAKE_OBJCOPY} -O ihex -R .eeprom \${PROJECT_NAME} \${PROJECT_NAME}.hex
-              COMMENT "Generating HEX file for upload")
+              COMMAND avr-objcopy -O ihex -R .eeprom \${PROJECT_NAME} \${PROJECT_NAME}.hex
+              COMMENT "Generating HEX file")
           endif()
-
-          EOF
-
-          cat <<EOF > shell.nix
-          { pkgs ? import <nixpkgs> {} }:
-          pkgs.mkShell {
-            buildInputs = with pkgs; [
-              cmake
-              gnumake
-              avrdude
-              pkgsCross.avr.buildPackages.gcc
-            ];
-            shellHook = ''
-              echo " Shell-Nix activated for ${{ github.event.inputs.mcu }} "
-            '';
-          }
           EOF
 
           cat <<EOF > scripts/build.sh
-
+          #!/bin/bash
           mkdir -p build && cd build
-
-          cmake..
-          make -j\${nproc}
+          cmake ..
+          make -j\$(nproc)
           EOF
-
-          cat <<EOF > scripts/deploy.sh
-          PORT=\$(ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -n 1)
-          if [ -z "\$PORT" ]; then
-              echo "Error: No usb connection"
-              exit 1
-          fi
-          echo "Flash on \$PORT..."
-          avrdude -v -p atmega328p -c arduino -P "\$PORT" -b 115200 -D -U flash:w:build/${{ github.event.inputs.project_name }}.hex:i
-          EOF
-
 
           chmod +x scripts/*.sh
 
@@ -97,5 +86,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          git commit -m "Initialize ${{ github.event.inputs.project_name }} structure"
-          git push
+          # Evităm eroarea dacă nu sunt modificări
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Initialize project structure" && git push)
